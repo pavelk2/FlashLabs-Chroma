@@ -1,0 +1,37 @@
+# FlashLabs Chroma - Docker Compose Configuration
+# Use: docker compose up --build
+
+services:
+  chroma:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_ID=FlashLabs/Chroma-4B
+      - PORT=8000
+      - HF_HOME=/app/.cache/huggingface
+    volumes:
+      # Cache model weights to avoid re-downloading
+      - model-cache:/app/.cache/huggingface
+      # Mount example files for voice cloning
+      - ./example:/app/example:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 300s
+
+volumes:
+  model-cache:
+    driver: local
