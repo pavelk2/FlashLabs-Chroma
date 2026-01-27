@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlashLabs Chroma - Voice Agent</title>
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a2e;
+            --bg-hover: #252540;
+            --accent: #6c63ff;
+            --accent-glow: rgba(108, 99, 255, 0.3);
+            --accent-hover: #7b73ff;
+            --text-primary: #e8e8f0;
+            --text-secondary: #9090a8;
+            --border: #2a2a40;
+            --success: #4caf50;
+            --error: #f44336;
+            --warning: #ff9800;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            padding: 1.5rem 2rem;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .logo h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .logo span {
+            color: var(--accent);
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--warning);
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 6px var(--success);
+        }
+
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            gap: 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .voice-visualizer {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            transition: transform 0.3s ease;
+        }
+
+        .voice-visualizer.active {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .voice-visualizer.processing {
+            animation: spin-glow 2s linear infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.08); opacity: 1; }
+        }
+
+        @keyframes spin-glow {
+            0% { box-shadow: 0 0 30px var(--accent-glow); }
+            50% { box-shadow: 0 0 60px var(--accent-glow); }
+            100% { box-shadow: 0 0 30px var(--accent-glow); }
+        }
+
+        .visualizer-inner {
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            border: 2px solid var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .wave-bars {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            height: 60px;
+        }
+
+        .wave-bar {
+            width: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: height 0.1s ease;
+            height: 8px;
+        }
+
+        .voice-visualizer.active .wave-bar {
+            animation: wave 0.6s ease-in-out infinite;
+        }
+
+        .voice-visualizer.processing .wave-bar {
+            animation: wave-processing 1s ease-in-out infinite;
+        }
+
+        @keyframes wave {
+            0%, 100% { height: 8px; }
+            50% { height: 40px; }
+        }
+
+        @keyframes wave-processing {
+            0%, 100% { height: 12px; opacity: 0.5; }
+            50% { height: 30px; opacity: 1; }
+        }
+
+        .wave-bar:nth-child(1) { animation-delay: 0s; }
+        .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+        .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+        .wave-bar:nth-child(4) { animation-delay: 0.3s; }
+        .wave-bar:nth-child(5) { animation-delay: 0.4s; }
+        .wave-bar:nth-child(6) { animation-delay: 0.15s; }
+        .wave-bar:nth-child(7) { animation-delay: 0.25s; }
+
+        .status-text {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            text-align: center;
+            min-height: 1.5em;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            width: 100%;
+        }
+
+        .record-btn {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid var(--accent);
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .record-btn:hover {
+            background: var(--accent-glow);
+            transform: scale(1.05);
+        }
+
+        .record-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .record-btn .mic-icon {
+            width: 28px;
+            height: 28px;
+            fill: var(--accent);
+            transition: fill 0.3s;
+        }
+
+        .record-btn.recording {
+            border-color: var(--error);
+            background: rgba(244, 67, 54, 0.15);
+            animation: record-pulse 1s ease-in-out infinite;
+        }
+
+        .record-btn.recording .mic-icon {
+            fill: var(--error);
+        }
+
+        @keyframes record-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4); }
+            50% { box-shadow: 0 0 0 15px rgba(244, 67, 54, 0); }
+        }
+
+        .stop-icon {
+            width: 24px;
+            height: 24px;
+            background: var(--error);
+            border-radius: 4px;
+            display: none;
+        }
+
+        .record-btn.recording .mic-icon { display: none; }
+        .record-btn.recording .stop-icon { display: block; }
+
+        .settings-panel {
+            width: 100%;
+            background: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            padding: 1.25rem;
+        }
+
+        .settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .settings-header h3 {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .settings-toggle {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            transition: transform 0.3s;
+        }
+
+        .settings-body {
+            display: none;
+            margin-top: 1rem;
+        }
+
+        .settings-body.open {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.4rem;
+        }
+
+        .form-group select,
+        .form-group input[type="range"] {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .form-group select:focus {
+            border-color: var(--accent);
+        }
+
+        .form-group select option {
+            background: var(--bg-secondary);
+        }
+
+        .range-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .range-row input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            border: none;
+            padding: 0;
+        }
+
+        .range-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+        }
+
+        .range-value {
+            min-width: 2.5rem;
+            text-align: right;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .conversation-log {
+            width: 100%;
+            max-height: 200px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .log-entry {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0.8rem;
+            background: var(--bg-card);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            font-size: 0.85rem;
+        }
+
+        .log-entry .role {
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--accent);
+            min-width: 60px;
+        }
+
+        .log-entry .role.assistant {
+            color: var(--success);
+        }
+
+        .log-entry audio {
+            height: 32px;
+            flex: 1;
+        }
+
+        .upload-area {
+            width: 100%;
+            padding: 1rem;
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.3s, background 0.3s;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .upload-area:hover {
+            border-color: var(--accent);
+            background: rgba(108, 99, 255, 0.05);
+        }
+
+        .upload-area input {
+            display: none;
+        }
+
+        footer {
+            padding: 1rem 2rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border);
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        @media (max-width: 600px) {
+            .main-container { padding: 1rem; }
+            .voice-visualizer { width: 150px; height: 150px; }
+            .visualizer-inner { width: 110px; height: 110px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <div class="logo-icon">C</div>
+            <h1>Flash<span>Labs</span> Chroma</h1>
+        </div>
+        <div class="status-badge">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusLabel">Connecting...</span>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div class="voice-visualizer" id="visualizer">
+            <div class="visualizer-inner">
+                <div class="wave-bars">
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                </div>
+            </div>
+        </div>
+
+        <p class="status-text" id="statusText">Press the microphone to start talking</p>
+
+        <div class="controls">
+            <button class="record-btn" id="recordBtn" disabled>
+                <svg class="mic-icon" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                </svg>
+                <div class="stop-icon"></div>
+            </button>
+
+            <div class="upload-area" id="uploadArea">
+                <p>Or drag & drop / click to upload an audio file</p>
+                <input type="file" id="audioFileInput" accept="audio/*">
+            </div>
+
+            <div class="settings-panel">
+                <div class="settings-header" id="settingsToggle">
+                    <h3>Settings</h3>
+                    <span class="settings-toggle" id="settingsArrow">&#9660;</span>
+                </div>
+                <div class="settings-body" id="settingsBody">
+                    <div class="form-group">
+                        <label for="speakerSelect">Speaker Voice</label>
+                        <select id="speakerSelect">
+                            <option value="scarlett_johansson">Scarlett Johansson</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Tokens: <span id="maxTokensVal">200</span></label>
+                        <div class="range-row">
+                            <input type="range" id="maxTokens" min="50" max="500" step="10" value="200">
+                            <span class="range-value" id="maxTokensDisplay">200</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Temperature</label>
+                        <div class="range-row">
+                            <input type="range" id="temperature" min="0.1" max="1.5" step="0.1" value="0.7">
+                            <span class="range-value" id="temperatureDisplay">0.7</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Top-K</label>
+                        <div class="range-row">
+                            <input type="range" id="topK" min="1" max="100" step="1" value="50">
+                            <span class="range-value" id="topKDisplay">50</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="conversation-log" id="conversationLog"></div>
+    </div>
+
+    <footer>
+        Powered by <a href="https://github.com/FlashLabs/Chroma" target="_blank">FlashLabs Chroma</a> &mdash;
+        Real-Time End-to-End Spoken Dialogue Model
+    </footer>
+
+    <script>
+    (function() {
+        // DOM elements
+        const recordBtn = document.getElementById('recordBtn');
+        const visualizer = document.getElementById('visualizer');
+        const statusText = document.getElementById('statusText');
+        const statusDot = document.getElementById('statusDot');
+        const statusLabel = document.getElementById('statusLabel');
+        const speakerSelect = document.getElementById('speakerSelect');
+        const conversationLog = document.getElementById('conversationLog');
+        const settingsToggle = document.getElementById('settingsToggle');
+        const settingsBody = document.getElementById('settingsBody');
+        const settingsArrow = document.getElementById('settingsArrow');
+        const uploadArea = document.getElementById('uploadArea');
+        const audioFileInput = document.getElementById('audioFileInput');
+
+        // Range sliders
+        const maxTokensSlider = document.getElementById('maxTokens');
+        const temperatureSlider = document.getElementById('temperature');
+        const topKSlider = document.getElementById('topK');
+
+        // State
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+        let ws = null;
+        let useWebSocket = false;
+
+        // Settings panel toggle
+        settingsToggle.addEventListener('click', () => {
+            settingsBody.classList.toggle('open');
+            settingsArrow.textContent = settingsBody.classList.contains('open') ? '\u25B2' : '\u25BC';
+        });
+
+        // Range slider displays
+        maxTokensSlider.addEventListener('input', () => {
+            document.getElementById('maxTokensDisplay').textContent = maxTokensSlider.value;
+            document.getElementById('maxTokensVal').textContent = maxTokensSlider.value;
+        });
+        temperatureSlider.addEventListener('input', () => {
+            document.getElementById('temperatureDisplay').textContent = temperatureSlider.value;
+        });
+        topKSlider.addEventListener('input', () => {
+            document.getElementById('topKDisplay').textContent = topKSlider.value;
+        });
+
+        // File upload
+        uploadArea.addEventListener('click', () => audioFileInput.click());
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.style.borderColor = 'var(--accent)'; });
+        uploadArea.addEventListener('dragleave', () => { uploadArea.style.borderColor = ''; });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '';
+            if (e.dataTransfer.files.length > 0) {
+                handleAudioFile(e.dataTransfer.files[0]);
+            }
+        });
+        audioFileInput.addEventListener('change', () => {
+            if (audioFileInput.files.length > 0) {
+                handleAudioFile(audioFileInput.files[0]);
+            }
+        });
+
+        // Load speakers
+        async function loadSpeakers() {
+            try {
+                const resp = await fetch('/api/speakers');
+                const data = await resp.json();
+                speakerSelect.innerHTML = '';
+                data.speakers.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.id;
+                    opt.textContent = s.name;
+                    speakerSelect.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Failed to load speakers:', e);
+            }
+        }
+
+        // Health check
+        async function checkHealth() {
+            try {
+                const resp = await fetch('/api/health');
+                const data = await resp.json();
+                if (data.model_loaded) {
+                    statusDot.classList.add('connected');
+                    statusLabel.textContent = 'Model ready';
+                    recordBtn.disabled = false;
+                } else {
+                    statusLabel.textContent = 'Loading model...';
+                    setTimeout(checkHealth, 5000);
+                }
+            } catch (e) {
+                statusLabel.textContent = 'Server unavailable';
+                setTimeout(checkHealth, 5000);
+            }
+        }
+
+        // WebSocket connection
+        function connectWebSocket() {
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${location.host}/ws/voice`);
+
+            ws.onopen = () => {
+                useWebSocket = true;
+                sendWSConfig();
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'audio') {
+                    handleResponseAudio(data.data);
+                } else if (data.type === 'status') {
+                    statusText.textContent = data.message === 'processing' ? 'Generating response...' : data.message;
+                } else if (data.type === 'error') {
+                    statusText.textContent = 'Error: ' + data.message;
+                    visualizer.classList.remove('processing');
+                }
+            };
+
+            ws.onclose = () => {
+                useWebSocket = false;
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = () => {
+                useWebSocket = false;
+            };
+        }
+
+        function sendWSConfig() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'config',
+                    speaker: speakerSelect.value,
+                    max_new_tokens: parseInt(maxTokensSlider.value),
+                    temperature: parseFloat(temperatureSlider.value),
+                    top_k: parseInt(topKSlider.value),
+                }));
+            }
+        }
+
+        // Recording
+        recordBtn.addEventListener('click', async () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    stream.getTracks().forEach(t => t.stop());
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    processAudio(audioBlob);
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                recordBtn.classList.add('recording');
+                visualizer.classList.add('active');
+                statusText.textContent = 'Listening... click to stop';
+            } catch (e) {
+                statusText.textContent = 'Microphone access denied';
+                console.error('Mic error:', e);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            isRecording = false;
+            recordBtn.classList.remove('recording');
+            visualizer.classList.remove('active');
+        }
+
+        function handleAudioFile(file) {
+            if (!file.type.startsWith('audio/')) {
+                statusText.textContent = 'Please upload an audio file';
+                return;
+            }
+            processAudio(file);
+        }
+
+        async function processAudio(audioBlob) {
+            visualizer.classList.add('processing');
+            statusText.textContent = 'Generating response...';
+            recordBtn.disabled = true;
+
+            // Add input to conversation log
+            addLogEntry('You', audioBlob);
+
+            if (useWebSocket && ws && ws.readyState === WebSocket.OPEN) {
+                // Use WebSocket
+                sendWSConfig();
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1] || btoa(reader.result);
+                    ws.send(JSON.stringify({ type: 'audio', data: base64 }));
+                };
+                reader.readAsDataURL(audioBlob);
+            } else {
+                // Use REST API
+                try {
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob, 'recording.webm');
+                    formData.append('speaker', speakerSelect.value);
+                    formData.append('max_new_tokens', maxTokensSlider.value);
+                    formData.append('temperature', temperatureSlider.value);
+                    formData.append('top_k', topKSlider.value);
+
+                    const resp = await fetch('/api/generate', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+                        throw new Error(err.detail || 'Request failed');
+                    }
+
+                    const responseBlob = await resp.blob();
+                    const b64 = await blobToBase64(responseBlob);
+                    handleResponseAudio(b64.split(',')[1]);
+                } catch (e) {
+                    statusText.textContent = 'Error: ' + e.message;
+                    visualizer.classList.remove('processing');
+                    recordBtn.disabled = false;
+                }
+            }
+        }
+
+        function handleResponseAudio(base64Data) {
+            visualizer.classList.remove('processing');
+            recordBtn.disabled = false;
+            statusText.textContent = 'Response ready. Press microphone to talk again.';
+
+            // Decode and play
+            const audioBytes = atob(base64Data);
+            const arrayBuffer = new ArrayBuffer(audioBytes.length);
+            const view = new Uint8Array(arrayBuffer);
+            for (let i = 0; i < audioBytes.length; i++) {
+                view[i] = audioBytes.charCodeAt(i);
+            }
+
+            const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+            addLogEntry('Chroma', blob);
+
+            const audioUrl = URL.createObjectURL(blob);
+            const audio = new Audio(audioUrl);
+            audio.play().catch(() => {
+                statusText.textContent = 'Click anywhere to enable audio playback, then try again.';
+            });
+        }
+
+        function addLogEntry(role, audioBlob) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const roleSpan = document.createElement('span');
+            roleSpan.className = 'role' + (role === 'Chroma' ? ' assistant' : '');
+            roleSpan.textContent = role;
+
+            const audioEl = document.createElement('audio');
+            audioEl.controls = true;
+            audioEl.src = URL.createObjectURL(audioBlob);
+
+            entry.appendChild(roleSpan);
+            entry.appendChild(audioEl);
+            conversationLog.appendChild(entry);
+            conversationLog.scrollTop = conversationLog.scrollHeight;
+        }
+
+        function blobToBase64(blob) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        // Update WS config when settings change
+        speakerSelect.addEventListener('change', sendWSConfig);
+        maxTokensSlider.addEventListener('change', sendWSConfig);
+        temperatureSlider.addEventListener('change', sendWSConfig);
+        topKSlider.addEventListener('change', sendWSConfig);
+
+        // Init
+        loadSpeakers();
+        checkHealth();
+        connectWebSocket();
+    })();
+    </script>
+</body>
+</html>
