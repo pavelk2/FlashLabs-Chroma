@@ -1,6 +1,12 @@
 """
 Modal deployment for the Chroma WebSocket voice server.
 
+Prerequisites:
+    1. Accept model access at https://huggingface.co/FlashLabs/Chroma-4B
+    2. Create a HuggingFace token at https://huggingface.co/settings/tokens
+    3. Add it as a Modal secret:
+       modal secret create huggingface HF_TOKEN=hf_your_token_here
+
 Deploy with:
     modal deploy modal_app.py
 
@@ -48,6 +54,9 @@ chroma_image = (
 
 model_volume = modal.Volume.from_name("chroma-model-cache", create_if_missing=True)
 
+# --------------- HuggingFace secret for gated model access ---------------
+
+hf_secret = modal.Secret.from_name("huggingface")
 
 # --------------- Modal App ---------------
 
@@ -56,28 +65,32 @@ app = modal.App("chroma-voice-server", image=chroma_image)
 
 @app.function(
     volumes={MODELS_DIR: model_volume},
+    secrets=[hf_secret],
     timeout=600,
 )
 def download_model():
     """Download model weights to the persistent volume."""
+    import os
     from huggingface_hub import snapshot_download
 
     snapshot_download(
         MODEL_ID,
         local_dir=f"{MODELS_DIR}/Chroma-4B",
+        token=os.environ["HF_TOKEN"],
     )
     model_volume.commit()
     print("Model downloaded successfully.")
 
 
 @app.cls(
-    gpu=modal.gpu.A100(size="40GB"),
+    gpu="A100-40GB",
     volumes={MODELS_DIR: model_volume},
-    container_idle_timeout=300,
+    secrets=[hf_secret],
+    scaledown_window=300,
     timeout=600,
-    allow_concurrent_inputs=1,
     enable_memory_snapshot=True,
 )
+@modal.concurrent(max_inputs=1)
 class ChromaServer:
     """Modal class that hosts the Chroma WebSocket server."""
 
