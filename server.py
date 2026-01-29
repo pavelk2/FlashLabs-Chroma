@@ -12,6 +12,7 @@ import logging
 import struct
 import tempfile
 import os
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -291,7 +292,11 @@ async def _handle_audio(ws: WebSocket, session: SessionState, audio_bytes: bytes
         await ws.send_json({"type": "status", "message": "processing"})
 
         tmp_path = audio_bytes_to_file(audio_bytes)
-        audio_np, sr = generate_speech(
+
+        # Run blocking model inference in a thread so the event loop
+        # stays alive for WebSocket ping/pong keepalives.
+        audio_np, sr = await asyncio.to_thread(
+            generate_speech,
             audio_path=tmp_path,
             system_prompt=session.system_prompt,
             voice_name=session.voice_name,
