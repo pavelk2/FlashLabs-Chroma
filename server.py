@@ -60,8 +60,18 @@ def load_model(model_id: str = "FlashLabs/Chroma-4B"):
         model_id,
         trust_remote_code=True,
         device_map="auto",
+        torch_dtype=torch.bfloat16,
     )
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+
+    # Compile for faster repeated inference (first call will be slower)
+    if hasattr(torch, "compile"):
+        try:
+            model = torch.compile(model, mode="reduce-overhead")
+            logger.info("Model compiled with torch.compile (reduce-overhead)")
+        except Exception as e:
+            logger.warning("torch.compile failed, running without: %s", e)
+
     logger.info("Model loaded successfully on %s", model.device)
 
 
@@ -179,7 +189,7 @@ class SessionState:
         self.voice_name: Optional[str] = None
         self.custom_prompt_audio: Optional[str] = None
         self.custom_prompt_text: Optional[str] = None
-        self.max_new_tokens: int = 500
+        self.max_new_tokens: int = 150
         self.temperature: float = 0.7
         self.top_p: float = 0.9
 
