@@ -14,7 +14,11 @@ Run locally (dev mode):
     modal serve modal_app.py
 """
 
+from pathlib import Path
+
 import modal
+
+LOCAL_DIR = Path(__file__).parent
 
 MODELS_DIR = "/models"
 MODEL_ID = "FlashLabs/Chroma-4B"
@@ -67,6 +71,10 @@ chroma_image = (
         "apt-get update && apt-get install -y libsndfile1 ffmpeg && rm -rf /var/lib/apt/lists/*"
     )
     .run_function(download_model, secrets=[hf_secret])
+    .add_local_file(str(LOCAL_DIR / "server.py"), "/root/server.py")
+    .add_local_dir(str(LOCAL_DIR / "static"), "/root/static")
+    .add_local_dir(str(LOCAL_DIR / "example"), "/root/example")
+    .add_local_dir(str(LOCAL_DIR / "chroma"), "/root/chroma")
 )
 
 
