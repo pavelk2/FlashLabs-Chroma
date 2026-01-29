@@ -21,6 +21,7 @@ import torch
 import torchaudio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger("chroma-server")
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +39,8 @@ AVAILABLE_VOICES = {
     name.stem: name.stem
     for name in PROMPT_AUDIO_DIR.glob("*.wav")
 } if PROMPT_AUDIO_DIR.exists() else {}
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Chroma Voice Server")
 
@@ -320,6 +323,12 @@ async def _handle_audio(ws: WebSocket, session: SessionState, audio_bytes: bytes
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+# --------------- Static files (web UI) ---------------
+
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
 
 # --------------- Local entrypoint ---------------

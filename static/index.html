@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chroma Voice Agent</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+  }
+
+  /* --- Network background decoration --- */
+  .bg-decoration {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.12;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(59,130,246,0.3) 0%, transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(139,92,246,0.3) 0%, transparent 50%);
+  }
+
+  /* --- Header --- */
+  header {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 900px;
+    padding: 2rem 1.5rem 0;
+    text-align: center;
+  }
+
+  .badge {
+    display: inline-block;
+    background: rgba(59,130,246,0.15);
+    color: #60a5fa;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 0.35rem 1rem;
+    border-radius: 999px;
+    margin-bottom: 1.2rem;
+  }
+
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 3rem);
+    font-weight: 700;
+    line-height: 1.15;
+    color: #fff;
+    margin-bottom: 0.6rem;
+  }
+
+  h1 .accent { color: #3b82f6; }
+
+  .subtitle {
+    color: #888;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    max-width: 500px;
+    margin: 0 auto 2rem;
+  }
+
+  /* --- Main card --- */
+  .card {
+    position: relative;
+    z-index: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 1.5rem;
+    padding: 3rem 2rem;
+    width: 90%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    backdrop-filter: blur(20px);
+  }
+
+  /* --- Animated orb behind mic --- */
+  .orb-container {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .orb {
+    position: absolute;
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 40%,
+      rgba(59,130,246,0.6),
+      rgba(139,92,246,0.5) 50%,
+      rgba(236,72,153,0.3) 100%);
+    filter: blur(30px);
+    opacity: 0.5;
+    transition: opacity 0.4s, transform 0.4s;
+  }
+
+  .orb.active {
+    opacity: 1;
+    transform: scale(1.2);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  .orb.processing {
+    opacity: 0.8;
+    background: radial-gradient(circle at 40% 40%,
+      rgba(139,92,246,0.8),
+      rgba(236,72,153,0.5) 50%,
+      rgba(59,130,246,0.3) 100%);
+    animation: spin-pulse 2s linear infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1.15); }
+    50% { transform: scale(1.35); }
+  }
+
+  @keyframes spin-pulse {
+    0% { transform: scale(1.1) rotate(0deg); }
+    50% { transform: scale(1.25) rotate(180deg); }
+    100% { transform: scale(1.1) rotate(360deg); }
+  }
+
+  /* --- Mic button --- */
+  .mic-btn {
+    position: relative;
+    z-index: 2;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(20,20,30,0.9);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 0 0 0 rgba(59,130,246,0);
+  }
+
+  .mic-btn:hover { background: rgba(30,30,50,0.95); }
+  .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .mic-btn.recording {
+    background: rgba(239,68,68,0.9);
+    box-shadow: 0 0 0 8px rgba(239,68,68,0.2);
+  }
+
+  .mic-btn svg {
+    width: 28px;
+    height: 28px;
+    fill: currentColor;
+  }
+
+  /* --- Status label --- */
+  .status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #666;
+    min-height: 1.2em;
+    transition: color 0.3s;
+  }
+
+  .status.connected { color: #4ade80; }
+  .status.recording { color: #ef4444; }
+  .status.processing { color: #a78bfa; }
+  .status.playing { color: #60a5fa; }
+  .status.error { color: #f87171; }
+
+  /* --- Controls row --- */
+  .controls {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .voice-select {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 0.75rem;
+    color: #ccc;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.82rem;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    padding-right: 2rem;
+  }
+
+  .voice-select:hover { border-color: rgba(255,255,255,0.25); }
+
+  .voice-select option {
+    background: #1a1a2e;
+    color: #ccc;
+  }
+
+  /* --- Audio response area --- */
+  .response-area {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 48px;
+  }
+
+  .response-area audio {
+    width: 100%;
+    max-width: 320px;
+    height: 40px;
+    border-radius: 0.5rem;
+  }
+
+  .response-label {
+    font-size: 0.72rem;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  /* --- Conversation log --- */
+  .log {
+    position: relative;
+    z-index: 1;
+    width: 90%;
+    max-width: 420px;
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-bottom: 2rem;
+  }
+
+  .log-entry {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .log-entry .icon {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+  }
+
+  .log-entry.user .icon { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .log-entry.assistant .icon { background: rgba(139,92,246,0.2); color: #a78bfa; }
+
+  .log-entry audio {
+    height: 36px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .log-entry .meta {
+    font-size: 0.7rem;
+    color: #555;
+    flex-shrink: 0;
+  }
+
+  /* --- Footer --- */
+  footer {
+    position: relative;
+    z-index: 1;
+    padding: 2rem;
+    text-align: center;
+    font-size: 0.72rem;
+    color: #444;
+  }
+
+  footer a { color: #60a5fa; text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="bg-decoration"></div>
+
+  <header>
+    <div class="badge">Chroma Voice Agent</div>
+    <h1>Talk to <span class="accent">Chroma.</span></h1>
+    <p class="subtitle">
+      Real-time speech-to-speech powered by FlashLabs Chroma.
+      Click the microphone, speak, and hear the response.
+    </p>
+  </header>
+
+  <div class="card">
+    <div class="orb-container">
+      <div class="orb" id="orb"></div>
+      <button class="mic-btn" id="micBtn" disabled>
+        <svg id="micIcon" viewBox="0 0 24 24">
+          <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm-1-9a1 1 0 1 1 2 0v6a1 1 0 1 1-2 0V5z"/>
+          <path d="M17 11a1 1 0 0 1 2 0 7 7 0 0 1-6 6.92V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-3.08A7 7 0 0 1 5 11a1 1 0 0 1 2 0 5 5 0 0 0 10 0z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="status" id="status">Connecting...</div>
+
+    <div class="controls">
+      <select class="voice-select" id="voiceSelect">
+        <option value="">Default Voice</option>
+      </select>
+    </div>
+
+    <div class="response-area" id="responseArea"></div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <footer>
+    Powered by <a href="https://github.com/FlashLabs-AI-Corp/FlashLabs-Chroma" target="_blank">FlashLabs Chroma</a>
+  </footer>
+
+<script>
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/chat`;
+const HEALTH_URL = `${location.origin}/health`;
+
+const micBtn = document.getElementById('micBtn');
+const micIcon = document.getElementById('micIcon');
+const orb = document.getElementById('orb');
+const statusEl = document.getElementById('status');
+const voiceSelect = document.getElementById('voiceSelect');
+const responseArea = document.getElementById('responseArea');
+const logEl = document.getElementById('log');
+
+let ws = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+let turnCount = 0;
+
+// --- Status helpers ---
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = 'status ' + (cls || '');
+}
+
+// --- Fetch available voices ---
+async function loadVoices() {
+  try {
+    const res = await fetch(`${location.origin}/voices`);
+    const data = await res.json();
+    (data.voices || []).forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      voiceSelect.appendChild(opt);
+    });
+  } catch (e) {
+    console.warn('Could not load voices:', e);
+  }
+}
+
+// --- WebSocket connection ---
+function connect() {
+  setStatus('Connecting...', '');
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    setStatus('Ready — tap to speak', 'connected');
+    micBtn.disabled = false;
+    sendConfig();
+  };
+
+  ws.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    handleServerMessage(msg);
+  };
+
+  ws.onclose = () => {
+    setStatus('Disconnected — reconnecting...', 'error');
+    micBtn.disabled = true;
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+function sendConfig() {
+  const voice = voiceSelect.value;
+  const cfg = { type: 'config' };
+  if (voice) cfg.voice = voice;
+  ws.send(JSON.stringify(cfg));
+}
+
+voiceSelect.addEventListener('change', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) sendConfig();
+});
+
+// --- Recording ---
+micBtn.addEventListener('click', async () => {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    await startRecording();
+  }
+});
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      sendAudio(blob);
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    micBtn.classList.add('recording');
+    orb.classList.add('active');
+    orb.classList.remove('processing');
+    setStatus('Recording — tap to stop', 'recording');
+    updateMicIcon(true);
+  } catch (e) {
+    setStatus('Microphone access denied', 'error');
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  isRecording = false;
+  micBtn.classList.remove('recording');
+  orb.classList.remove('active');
+  orb.classList.add('processing');
+  setStatus('Processing...', 'processing');
+  updateMicIcon(false);
+}
+
+function updateMicIcon(recording) {
+  if (recording) {
+    micIcon.innerHTML = '<rect x="6" y="6" width="12" height="12" rx="2"/>';
+  } else {
+    micIcon.innerHTML =
+      '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm-1-9a1 1 0 1 1 2 0v6a1 1 0 1 1-2 0V5z"/>' +
+      '<path d="M17 11a1 1 0 0 1 2 0 7 7 0 0 1-6 6.92V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-3.08A7 7 0 0 1 5 11a1 1 0 0 1 2 0 5 5 0 0 0 10 0z"/>';
+  }
+}
+
+// --- Send audio over WebSocket ---
+async function sendAudio(blob) {
+  // Convert webm to WAV via AudioContext for server compatibility
+  const arrayBuf = await blob.arrayBuffer();
+  const audioCtx = new AudioContext({ sampleRate: 24000 });
+  let decoded;
+  try {
+    decoded = await audioCtx.decodeAudioData(arrayBuf);
+  } catch (e) {
+    // Fallback: send as-is (server may handle webm)
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(reader.result)));
+      ws.send(JSON.stringify({ type: 'audio', data: base64 }));
+    };
+    reader.readAsArrayBuffer(blob);
+    addLogEntry('user', blob);
+    return;
+  }
+
+  // Resample to mono 24kHz PCM16 WAV
+  const samples = decoded.getChannelData(0);
+  const wav = encodeWAV(samples, 24000);
+  const wavBlob = new Blob([wav], { type: 'audio/wav' });
+
+  addLogEntry('user', wavBlob);
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(reader.result)));
+    ws.send(JSON.stringify({ type: 'audio', data: base64 }));
+  };
+  reader.readAsArrayBuffer(wavBlob);
+  audioCtx.close();
+}
+
+// --- Encode float32 samples to 16-bit WAV ---
+function encodeWAV(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  writeStr(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(view, 8, 'WAVE');
+  writeStr(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);         // PCM
+  view.setUint16(22, 1, true);         // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return buffer;
+
+  function writeStr(view, offset, str) {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  }
+}
+
+// --- Handle server messages ---
+function handleServerMessage(msg) {
+  switch (msg.type) {
+    case 'audio': {
+      const wavBytes = Uint8Array.from(atob(msg.data), c => c.charCodeAt(0));
+      const blob = new Blob([wavBytes], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+
+      // Show latest response
+      responseArea.innerHTML = `
+        <span class="response-label">Response</span>
+        <audio controls autoplay src="${url}"></audio>
+      `;
+
+      addLogEntry('assistant', blob);
+      orb.classList.remove('processing');
+      setStatus('Playing response...', 'playing');
+
+      const audio = responseArea.querySelector('audio');
+      audio.onended = () => setStatus('Ready — tap to speak', 'connected');
+      break;
+    }
+    case 'status':
+      if (msg.message === 'processing') {
+        setStatus('Model is thinking...', 'processing');
+      } else if (msg.message === 'done') {
+        // audio message handles the transition
+      }
+      break;
+    case 'config_ack':
+      break;
+    case 'error':
+      setStatus('Error: ' + msg.message, 'error');
+      orb.classList.remove('processing', 'active');
+      setTimeout(() => setStatus('Ready — tap to speak', 'connected'), 4000);
+      break;
+  }
+}
+
+// --- Conversation log ---
+function addLogEntry(role, audioBlob) {
+  turnCount++;
+  const url = URL.createObjectURL(audioBlob);
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${role}`;
+  entry.innerHTML = `
+    <div class="icon">${role === 'user' ? '🎤' : '🔊'}</div>
+    <audio controls src="${url}"></audio>
+    <div class="meta">#${turnCount}</div>
+  `;
+  logEl.prepend(entry);
+}
+
+// --- Init ---
+loadVoices();
+connect();
+</script>
+</body>
+</html>
