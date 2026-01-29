@@ -19,7 +19,26 @@ import modal
 MODELS_DIR = "/models"
 MODEL_ID = "FlashLabs/Chroma-4B"
 
+# --------------- HuggingFace secret for gated model access ---------------
+
+hf_secret = modal.Secret.from_name("huggingface")
+
 # --------------- Image definition ---------------
+# Model weights are downloaded at image build time, so HuggingFace is only
+# contacted once during `modal deploy`, never at runtime.
+
+
+def download_model():
+    """Called during image build to download weights into the image layer."""
+    import os
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(
+        MODEL_ID,
+        local_dir=f"{MODELS_DIR}/Chroma-4B",
+        token=os.environ["HF_TOKEN"],
+    )
+
 
 chroma_image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -47,45 +66,17 @@ chroma_image = (
     .run_commands(
         "apt-get update && apt-get install -y libsndfile1 ffmpeg && rm -rf /var/lib/apt/lists/*"
     )
+    .run_function(download_model, secrets=[hf_secret])
 )
 
-
-# --------------- Volume for cached model weights ---------------
-
-model_volume = modal.Volume.from_name("chroma-model-cache", create_if_missing=True)
-
-# --------------- HuggingFace secret for gated model access ---------------
-
-hf_secret = modal.Secret.from_name("huggingface")
 
 # --------------- Modal App ---------------
 
 app = modal.App("chroma-voice-server", image=chroma_image)
 
 
-@app.function(
-    volumes={MODELS_DIR: model_volume},
-    secrets=[hf_secret],
-    timeout=600,
-)
-def download_model():
-    """Download model weights to the persistent volume."""
-    import os
-    from huggingface_hub import snapshot_download
-
-    snapshot_download(
-        MODEL_ID,
-        local_dir=f"{MODELS_DIR}/Chroma-4B",
-        token=os.environ["HF_TOKEN"],
-    )
-    model_volume.commit()
-    print("Model downloaded successfully.")
-
-
 @app.cls(
     gpu="A100-40GB",
-    volumes={MODELS_DIR: model_volume},
-    secrets=[hf_secret],
     scaledown_window=300,
     timeout=600,
     enable_memory_snapshot=True,
@@ -110,12 +101,3 @@ class ChromaServer:
     @modal.asgi_app()
     def serve(self):
         return self.app
-
-
-# --------------- Local entrypoint for testing ---------------
-
-@app.local_entrypoint()
-def main():
-    """Download models if needed, then print the URL."""
-    download_model.remote()
-    print("Model downloaded. Deploy with: modal deploy modal_app.py")
