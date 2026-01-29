@@ -13,6 +13,7 @@ import struct
 import tempfile
 import os
 import asyncio
+import queue
 from pathlib import Path
 from typing import Optional
 
@@ -181,6 +182,110 @@ def generate_speech(
     return audio_np, SAMPLE_RATE
 
 
+# --------------- Streaming generation ---------------
+
+class AudioChunkStreamer:
+    """
+    Custom HuggingFace streamer that decodes audio in chunks during generation.
+    Accumulates codebook frames and decodes them via the Mimi codec every
+    `chunk_size` steps, putting audio numpy arrays into a thread-safe queue.
+    """
+
+    def __init__(self, codec_model, chunk_size: int = 25):
+        self.codec_model = codec_model
+        self.chunk_size = chunk_size
+        self.frames: list[torch.Tensor] = []
+        self.output_queue: queue.Queue = queue.Queue()
+
+    def put(self, token_ids: torch.Tensor):
+        """Called by the generation loop for each new frame."""
+        # token_ids: [B, num_codebooks] — one frame of 8 codebook tokens
+        self.frames.append(token_ids.clone())
+        if len(self.frames) >= self.chunk_size:
+            self._decode_and_enqueue()
+
+    def end(self):
+        """Called when generation is complete."""
+        if self.frames:
+            self._decode_and_enqueue()
+        self.output_queue.put(None)  # Sentinel to signal end
+
+    def _decode_and_enqueue(self):
+        """Decode accumulated frames to audio and put in queue."""
+        try:
+            # Stack frames: list of [B, 8] -> [B, T, 8]
+            stacked = torch.stack(self.frames, dim=0).unsqueeze(0)  # [1, T, 8]
+            with torch.no_grad():
+                audio = self.codec_model.decode(
+                    stacked.permute(0, 2, 1)  # [1, 8, T]
+                ).audio_values
+            audio_np = audio[0].cpu().detach().numpy().squeeze()
+            self.output_queue.put(audio_np)
+        except Exception as e:
+            logger.exception("Error decoding audio chunk")
+            self.output_queue.put(e)
+        finally:
+            self.frames = []
+
+
+def generate_speech_streaming(
+    audio_path: str,
+    streamer: AudioChunkStreamer,
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    voice_name: Optional[str] = None,
+    custom_prompt_audio: Optional[str] = None,
+    custom_prompt_text: Optional[str] = None,
+    max_new_tokens: int = 150,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+):
+    """
+    Run Chroma inference with streaming — audio chunks are put into
+    streamer.output_queue as they're decoded.
+    """
+    conversation = [[
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": system_prompt}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "audio", "audio": audio_path}],
+        },
+    ]]
+
+    prompt_text = [""]
+    prompt_audio = [str(PROMPT_AUDIO_DIR / "scarlett_johansson.wav")] if PROMPT_AUDIO_DIR.exists() else [""]
+
+    if voice_name and voice_name in AVAILABLE_VOICES:
+        prompt_text, prompt_audio = load_voice_prompt(voice_name)
+    elif custom_prompt_audio:
+        prompt_audio = [custom_prompt_audio]
+        prompt_text = [custom_prompt_text or ""]
+
+    inputs = processor(
+        conversation,
+        add_generation_prompt=True,
+        tokenize=False,
+        prompt_audio=prompt_audio,
+        prompt_text=prompt_text,
+    )
+
+    device = model.device
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=temperature,
+            top_p=top_p,
+            use_cache=True,
+            streamer=streamer,
+        )
+
+
 class SessionState:
     """Per-connection session state."""
 
@@ -296,45 +401,72 @@ def _apply_config(session: SessionState, msg: dict):
 
 
 async def _handle_audio(ws: WebSocket, session: SessionState, audio_bytes: bytes):
-    """Process incoming audio and send back generated speech."""
+    """Process incoming audio and stream back generated speech in chunks."""
     tmp_path = None
     try:
         await ws.send_json({"type": "status", "message": "processing"})
 
         tmp_path = audio_bytes_to_file(audio_bytes)
 
-        # Run blocking model inference in a thread so the event loop
-        # stays alive for WebSocket ping/pong keepalives.
-        audio_np, sr = await asyncio.to_thread(
-            generate_speech,
-            audio_path=tmp_path,
-            system_prompt=session.system_prompt,
-            voice_name=session.voice_name,
-            custom_prompt_audio=session.custom_prompt_audio,
-            custom_prompt_text=session.custom_prompt_text,
-            max_new_tokens=session.max_new_tokens,
-            temperature=session.temperature,
-            top_p=session.top_p,
+        # Create streamer that decodes audio in ~0.3s chunks (25 frames)
+        streamer = AudioChunkStreamer(model.codec_model, chunk_size=25)
+
+        # Start generation in background thread
+        loop = asyncio.get_event_loop()
+        gen_future = loop.run_in_executor(
+            None,
+            lambda: generate_speech_streaming(
+                audio_path=tmp_path,
+                streamer=streamer,
+                system_prompt=session.system_prompt,
+                voice_name=session.voice_name,
+                custom_prompt_audio=session.custom_prompt_audio,
+                custom_prompt_text=session.custom_prompt_text,
+                max_new_tokens=session.max_new_tokens,
+                temperature=session.temperature,
+                top_p=session.top_p,
+            ),
         )
 
-        # Encode response audio as WAV
-        buf = io.BytesIO()
-        sf.write(buf, audio_np, sr, format="WAV", subtype="PCM_16")
-        wav_bytes = buf.getvalue()
+        # Read audio chunks from the queue and send them as they arrive
+        chunk_idx = 0
+        while True:
+            # Poll queue from thread (non-blocking to keep event loop alive)
+            chunk = await asyncio.to_thread(streamer.output_queue.get)
 
-        # Send as base64 JSON
-        await ws.send_json({
-            "type": "audio",
-            "data": base64.b64encode(wav_bytes).decode("ascii"),
-            "sample_rate": sr,
-            "format": "wav",
-        })
+            if chunk is None:
+                # Generation complete
+                break
 
-        await ws.send_json({"type": "status", "message": "done"})
+            if isinstance(chunk, Exception):
+                await ws.send_json({"type": "error", "message": str(chunk)})
+                break
+
+            # Encode chunk as WAV and send
+            buf = io.BytesIO()
+            sf.write(buf, chunk, SAMPLE_RATE, format="WAV", subtype="PCM_16")
+            wav_bytes = buf.getvalue()
+
+            await ws.send_json({
+                "type": "audio_chunk",
+                "data": base64.b64encode(wav_bytes).decode("ascii"),
+                "chunk_index": chunk_idx,
+                "sample_rate": SAMPLE_RATE,
+                "format": "wav",
+            })
+            chunk_idx += 1
+
+        # Wait for generation thread to finish
+        await gen_future
+
+        await ws.send_json({"type": "audio_end", "total_chunks": chunk_idx})
 
     except Exception as e:
         logger.exception("Error processing audio")
-        await ws.send_json({"type": "error", "message": str(e)})
+        try:
+            await ws.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
