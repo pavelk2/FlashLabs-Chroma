@@ -1,0 +1,13 @@
+# Server dependencies (in addition to requirements.txt)
+# Install with: pip install -r requirements-server.txt
+
+# Everything from the base model
+-r requirements.txt
+
+# WebSocket server
+fastapi[standard]>=0.115.0
+uvicorn[standard]>=0.32.0
+websockets>=14.0
+
+# Modal deployment (install separately if deploying to Modal)
+# pip install modal
