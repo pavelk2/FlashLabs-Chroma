@@ -65,14 +65,6 @@ def load_model(model_id: str = "FlashLabs/Chroma-4B"):
     )
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
-    # Compile for faster repeated inference (first call will be slower)
-    if hasattr(torch, "compile"):
-        try:
-            model = torch.compile(model, mode="reduce-overhead")
-            logger.info("Model compiled with torch.compile (reduce-overhead)")
-        except Exception as e:
-            logger.warning("torch.compile failed, running without: %s", e)
-
     logger.info("Model loaded successfully on %s", model.device)
 
 
@@ -199,10 +191,12 @@ class AudioChunkStreamer:
 
     def put(self, token_ids: torch.Tensor):
         """Called by the generation loop for each new frame."""
-        # token_ids: [B, num_codebooks] — one frame of 8 codebook tokens
+        # token_ids shape from generation loop: [B, num_codebooks]
         self.frames.append(token_ids.clone())
         if len(self.frames) >= self.chunk_size:
             self._decode_and_enqueue()
+        if len(self.frames) == 1:
+            logger.info("Streamer: first frame received, shape=%s", token_ids.shape)
 
     def end(self):
         """Called when generation is complete."""
@@ -212,17 +206,20 @@ class AudioChunkStreamer:
 
     def _decode_and_enqueue(self):
         """Decode accumulated frames to audio and put in queue."""
+        num_frames = len(self.frames)
         try:
-            # Stack frames: list of [B, 8] -> [B, T, 8]
+            # Stack frames: list of [B, 8] -> [1, T, 8]
             stacked = torch.stack(self.frames, dim=0).unsqueeze(0)  # [1, T, 8]
+            logger.info("Streamer: decoding %d frames, stacked shape=%s", num_frames, stacked.shape)
             with torch.no_grad():
                 audio = self.codec_model.decode(
                     stacked.permute(0, 2, 1)  # [1, 8, T]
                 ).audio_values
             audio_np = audio[0].cpu().detach().numpy().squeeze()
+            logger.info("Streamer: decoded chunk, %d samples (%.2fs)", len(audio_np), len(audio_np) / 24000)
             self.output_queue.put(audio_np)
         except Exception as e:
-            logger.exception("Error decoding audio chunk")
+            logger.exception("Error decoding audio chunk (%d frames)", num_frames)
             self.output_queue.put(e)
         finally:
             self.frames = []
@@ -405,8 +402,10 @@ async def _handle_audio(ws: WebSocket, session: SessionState, audio_bytes: bytes
     tmp_path = None
     try:
         await ws.send_json({"type": "status", "message": "processing"})
+        logger.info("Received %d bytes of audio, starting streaming generation", len(audio_bytes))
 
         tmp_path = audio_bytes_to_file(audio_bytes)
+        logger.info("Audio saved to %s", tmp_path)
 
         # Create streamer that decodes audio in ~0.3s chunks (25 frames)
         streamer = AudioChunkStreamer(model.codec_model, chunk_size=25)
@@ -447,6 +446,7 @@ async def _handle_audio(ws: WebSocket, session: SessionState, audio_bytes: bytes
             sf.write(buf, chunk, SAMPLE_RATE, format="WAV", subtype="PCM_16")
             wav_bytes = buf.getvalue()
 
+            logger.info("Sending audio_chunk %d (%d bytes WAV)", chunk_idx, len(wav_bytes))
             await ws.send_json({
                 "type": "audio_chunk",
                 "data": base64.b64encode(wav_bytes).decode("ascii"),
@@ -459,6 +459,7 @@ async def _handle_audio(ws: WebSocket, session: SessionState, audio_bytes: bytes
         # Wait for generation thread to finish
         await gen_future
 
+        logger.info("Generation complete, sent %d chunks total", chunk_idx)
         await ws.send_json({"type": "audio_end", "total_chunks": chunk_idx})
 
     except Exception as e:
