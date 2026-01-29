@@ -49,6 +49,7 @@ chroma_image = (
     .pip_install(
         # Core ML
         "torch==2.7.1",
+        "torchvision==0.22.1",
         "torchaudio==2.7.1",
         "transformers==5.0.0rc0",
         "accelerate>=1.7.0",
